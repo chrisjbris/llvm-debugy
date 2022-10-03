@@ -13,6 +13,7 @@
 
 #include <vector>
 
+#include "lldb/Core/Value.h"
 #include "lldb/Expression/DWARFExpression.h"
 #include "lldb/lldb-private.h"
 
@@ -25,12 +26,12 @@ public:
   bool SetProgram(std::vector<uint8_t> *Data);
 
   llvm::Expected<lldb_private::Scalar>
-  EvaluateProgram(lldb::ModuleSP module_sp, DWARFUnit *unit,
-                  lldb_private::ExecutionContext *exe_ctx);
+  EvaluateProgram(lldb::ModuleSP module_sp = {}, DWARFUnit *unit = nullptr,
+                  lldb_private::ExecutionContext *exe_ctx = nullptr);
 
 private:
-  std::unique_ptr<std::vector<uint8_t>> Program; // DWARF program bytes
-  lldb_private::DataExtractor
+  std::unique_ptr<std::vector<uint8_t>> Program = nullptr; // DWARF program bytes
+  std::unique_ptr<lldb_private::DataExtractor>
       Extractor; // To be passed the program, then passed to lldb's evaluate()
   lldb_private::Value Result; // Holds evaluate result
   lldb_private::Status

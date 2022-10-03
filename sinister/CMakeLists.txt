@@ -13,14 +13,13 @@ include(GNUInstallDirs)
 
 include_directories(BEFORE ${SINISTER_INCLUDE_DIR} ${LLDB_INCLUDE_DIR})
 
+# set(LINK_LIBRARIES LLDB LLVM)
+
 add_llvm_executable(sinister
-        lib/sinister/DwarfExecutor.cpp
-        lib/sinister/sinister.cpp
-        lib/sinister/TextToDwarf.cpp
+    lib/sinister/DwarfExecutor.cpp
+    lib/sinister/sinister.cpp
+    lib/sinister/TextToDwarf.cpp
 )
+target_link_libraries(sinister PRIVATE lldbCore)
 
-set(SINISTER_LINK_LIBS
-    lldb
-    llvm)
-
-# target_link_libraries(sinister ${SINISTER_LINK_LIBS})
+# target_link_libraries(sinister LINK_LIBS LLDB)
