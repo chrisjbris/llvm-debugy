@@ -11,9 +11,9 @@
 //===----------------------------------------------------------------------===//
 #include "sinister/sinister.h"
 #include "lldb/API/SBCommandInterpreter.h"
-
+void test();
 auto main(int argc, const char **argv) -> int {
 
-
+    test();
     return 0;
 }

@@ -13,5 +13,6 @@ set(SINISTER_INCLUDE_DIR "${SINISTER_SOURCE_DIR}/include")
 set(LLDB_INCLUDE_DIR "${SINISTER_SOURCE_DIR}/../lldb/include")
 include_directories(BEFORE ${SINISTER_INCLUDE_DIR} ${LLDB_INCLUDE_DIR})
 add_llvm_executable(sinister
+        lib/parser.cpp
         lib/sinister/sinister.cpp
 )
