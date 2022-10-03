@@ -1,4 +1,4 @@
-//===-- sinister.cpp ----------------------------------------------------===//
+//===-- TextToDwarf.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,18 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file defines the sinister DWARF interpreter.
+// Implements methods to generate DWARF byte code from strings.
 //
 //===----------------------------------------------------------------------===//
-#include "sinister/sinister.h"
 
 
-
-
-auto main(int argc, const char **argv) -> int {
-    bool res = -1;
-
-
-
-    return res;
-}
+#include "sinister/TextToDwarf.h"
