@@ -1,5 +1,3 @@
-
-#include "llvm/Support/ErrorOr.h"
 #include <unordered_map>
 #include <string>
 #include <string_view>
@@ -48,26 +46,29 @@ std::string_view eatNextWord(std::string_view &Remaining) {
     return Result;
 }
 
-// For now just do dumb read-in without error checking or diagnostic help.
+// Dumb bare-bones string -> opcodes.
+// No useful errors, no non-opcode lexemes (e.g. uleb int operands).
 std::optional<std::vector<uint8_t>> parseExpression(
                                         std::string_view ExpressionString) {
     std::vector<uint8_t> Arr;
     while (!ExpressionString.empty()) {
         auto Word = eatNextWord(ExpressionString);
-        if (auto MaybeOpCode = getOpcode(Word))
+        if (auto MaybeOpCode = getOpcode(Word)) {
             Arr.push_back(*MaybeOpCode);
-        else
+        } else {
+            std::cerr << "Err: " << Word << " unknown opcode\n";
             return std::nullopt; // Provide useful errors.
+        }
     }
     return Arr;
 }
 
 void test() {
-    if (auto R = parseExpression("DW_OP_breg1 DW_OP_lit0 DW_OP_plus DW_OP_stack_value")) {
-        auto V = *R;
-        for (auto E : *R)
+    std::string Expr = "DW_OP_breg1 DW_OP_lit0 DW_OP_plus DW_OP_stack_value";
+    if (auto Arr = parseExpression(Expr)) {
+        for (auto E : *Arr)
             std::cout << std::hex << (uint32_t)E << " ";
-        std::cout << "\n";
+        std::cout << "\n:)\n";
     } else {
         std::cout << ":(\n";
     }
