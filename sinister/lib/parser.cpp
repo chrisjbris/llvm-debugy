@@ -19,11 +19,12 @@ enum OperandType {
     addr,
     // 4 bytes in 32-bit mode, 8 bytes in 64-bit mode:
     word,
-    // Not fixed - opcode specific:
+    // Not fixed, specified by the preceeding operand:
     variable,
 };
 
-static std::vector<llvm::SmallVector<OperandType, 3>> OperandsTypes = {
+using OperandTypeArray = llvm::SmallVector<OperandType, 3>;
+static const std::vector<OperandTypeArray> g_OperandTypes = {
     /* 0x00, reserved            */ {},
     /* 0x01, reserved            */ {},
     /* 0x02, reserved            */ {},
@@ -198,23 +199,123 @@ static std::vector<llvm::SmallVector<OperandType, 3>> OperandsTypes = {
     /* 0xff, DW_OP_lo_user       */ {},
 };
 
-std::optional<uint8_t> getOpcode(std::string_view Name) {
-    // Handily, LLVM already gives us all the DWARF operator names and codes
-    // in llvm/BinaryFormat/Dwarf.def
-    // HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)
-    #define HANDLE_DW_OP(OPCODE, NAME, UNUSED0, UNUSED1) \
-        { std::string("DW_OP_" #NAME), OPCODE},
-    std::unordered_map<std::string, uint8_t> Opcodes = {
-        #include "llvm/BinaryFormat/Dwarf.def"
-    };
-    #undef HANDLE_DW_OP
-    auto R = Opcodes.find(std::string(Name));
-    if (R != Opcodes.end())
+OperandTypeArray const &getOperandTypes(uint8_t Opcode) {
+    assert(Opcode < g_OperandTypes.size() && "Expected valid opcode");
+    return g_OperandTypes[Opcode];
+};
+
+// Handily, LLVM already gives us all the DWARF operator names and codes
+// in llvm/BinaryFormat/Dwarf.def
+// HANDLE_DW_OP(ID, NAME, VERSION, VENDOR)
+#define HANDLE_DW_OP(OPCODE, NAME, UNUSED0, UNUSED1) \
+    {std::string("DW_OP_" #NAME), OPCODE},
+std::unordered_map<std::string, uint8_t> g_StrToOpcode = {
+    #include "llvm/BinaryFormat/Dwarf.def"
+};
+#undef HANDLE_DW_OP
+#define HANDLE_DW_OP(OPCODE, NAME, UNUSED0, UNUSED1) \
+    {OPCODE, std::string("DW_OP_" #NAME)},
+std::unordered_map<uint8_t, std::string> g_OpcodeToStr = {
+    #include "llvm/BinaryFormat/Dwarf.def"
+};
+#undef HANDLE_DW_OP
+
+class Parser {
+    llvm::SmallVector<uint8_t> Output;
+
+    void parseOperands(uint8_t Opcode) {
+        auto const &OperandTypes = getOperandTypes(Opcode);
+        for (OperandType Ty : OperandTypes) {
+            // get it
+
+        }
+    }
+};
+
+struct SrcLoc {
+    unsigned Line;
+    unsigned Column;
+};
+
+struct Token {
+    enum Type { Opcode, Int, Comma, Error } Ty;
+    std::string_view lexeme;
+    SrcLoc Loc;
+    Token(Type Type, std::string_view lexeme, SrcLoc Loc) :
+        Ty(Ty), lexeme(lexeme), Loc(Loc) {}
+};
+
+class Lexer {
+    std::string_view Text;
+    unsigned Start;
+    unsigned Next;
+    SrcLoc StartLoc;
+    SrcLoc NextLoc;
+    bool atEnd() { return Next >= Text.size(); }
+    char peek() { return Text[Next]; }
+    char advance() {
+        char Ch = peek();
+        Next += 1;
+        NextLoc.Column += 1;
+        return Ch;
+    }
+    bool match(char Ch) {
+        if (atEnd() || peek() != Ch)
+            return false;
+        advance();
+        return true;
+    }
+    void eatWhitespace() {
+        while (!atEnd()) {
+            if (match('\n') || match('\r\n') || match('\v')) {
+                NextLoc.Column = 1;
+                NextLoc.Line += 1;
+                continue;
+            } else if (peek() == ' ' || peek() == '\t') {
+                continue;
+            }
+        }
+    }
+
+    Token create(Token::Type Type) {
+      return Token(Type, Text.substr(Start, Next - Start), StartLoc);
+    }
+
+    Token getNext() {
+        // TODO: Implement.
+    }
+
+public:
+    Lexer(std::string_view Text) : Text(Text) {
+        StartLoc.Line = 1;
+        StartLoc.Column = 1;
+    }
+
+    std::optional<llvm::SmallVector<Token>> lex() {
+        llvm::SmallVector<Token> Output;
+        while (!atEnd()) {
+            eatWhitespace();
+            Start = Next;
+            StartLoc = NextLoc;
+            if (atEnd())
+                break;
+            Token Tok = getNext();
+            if (Tok.Ty == Token::Error)
+                return std::nullopt;
+            Output.push_back(Tok);
+        }
+        return Output;
+    }
+};
+
+static std::optional<uint8_t> getOpcode(std::string_view Name) {
+    auto R = g_StrToOpcode.find(std::string(Name));
+    if (R != g_StrToOpcode.end())
         return R->second;
     return std::nullopt;
 }
 
-std::string_view eatNextWord(std::string_view &Remaining) {
+static std::string_view eatNextWord(std::string_view &Remaining) {
     unsigned Start = 0;
     while (Start < Remaining.size()) {
         char Ch = Remaining[Start];
