@@ -236,13 +236,13 @@ struct SrcLoc {
 };
 
 struct Token {
-    enum Type { Opcode, Int, Comma, Error } Ty;
+    enum Type { Opcode, Int, HexInt, Comma, Error } Ty;
     std::string_view lexeme;
     SrcLoc Loc;
-    llvm::APInt Value;
+    uint8_t Code;
     Token(Type Type, std::string_view lexeme, SrcLoc Loc,
-          llvm::APInt Value = llvm::APInt()) :
-        Ty(Ty), lexeme(lexeme), Loc(Loc), Value(Value) {}
+          uint8_t Code = 0) :
+        Ty(Ty), lexeme(lexeme), Loc(Loc), Code(Code) {}
 };
 
 class Lexer {
@@ -252,9 +252,16 @@ class Lexer {
     SrcLoc StartLoc;
     SrcLoc NextLoc;
 
-    Token error(SrcLoc Loc, std::string_view Err) {
+    Token error(SrcLoc Loc, std::string_view Msg) {
         std::cerr << "ERROR at line " << Loc.Line << ", col "
-                  << Loc.Column << ": " << Err << "\n";
+                  << Loc.Column << ": " << Msg << "\n";
+        return Token(Token::Error, std::string_view(), Loc);
+    }
+
+    Token error(SrcLoc Loc, std::string_view Expected, char Got) {
+        std::cerr << "ERROR at line " << Loc.Line << ", col "
+                  << Loc.Column << ": Expected " << Expected << " but got "
+                  << Got << "\n";
         return Token(Token::Error, std::string_view(), Loc);
     }
 
@@ -271,6 +278,9 @@ class Lexer {
             return false;
         advance();
         return true;
+    }
+    void advanceToSpace() {
+
     }
     void eatWhitespace() {
         while (!atEnd()) {
@@ -295,25 +305,48 @@ class Lexer {
         return Token(Type, getCurrentSubstr(), StartLoc);
     }
     Token createOpcode(uint8_t Code) {
-        llvm::APInt Value(8, Code);
-        return Token(Token::Opcode, getCurrentSubstr(), StartLoc, Value);
+        return Token(Token::Opcode, getCurrentSubstr(), StartLoc, Code);
     }
 
-    Token finishNumber() {
-        return create(Token::Error);
-    }
-
-    Token finishOpcode() {
+    Token finishNumber(char First) {
+        bool Hex = First == '0' && match('x');
         while(!atEnd()) {
             char Ch = peek();
             if (isspace(Ch))
                 break;
+            if (Hex) {
+                if (!std::isxdigit(Ch))
+                    return error(NextLoc, "hex digit", Ch);
+            } else {
+                if (!std::isdigit(Ch))
+                    return error(NextLoc, "digit", Ch);
+            }
+            advance();
+        }
+        if (Hex) {
+            // Chop off the 0x.
+            std::string_view Str = getCurrentSubstr().substr(2);
+            return Token(Token::HexInt, Str, StartLoc);
+        } else {
+            return create(Token::Int);
+        }
+    }
+
+    Token finishOpcode() {
+        // Advance to next space.
+        while(!atEnd()) {
+            char Ch = peek();
+            if (isspace(Ch))
+                break;
+            if (!std::isalnum(Ch) && Ch != '_')
+                return error(NextLoc, "alnum or _", Ch);
             advance();
         }
         std::string_view Str = getCurrentSubstr();
         if (auto Code = getOpcode(Str))
             return createOpcode(*Code);
-        return error(StartLoc, "Unknown operation: '" + std::string(Str) + "'");
+        return error(StartLoc, std::string("Unknown operation: '")
+                               + std::string(Str) + "'");
     }
 
     Token getNext() {
@@ -321,11 +354,11 @@ class Lexer {
         if (Ch == ',')
             return create(Token::Comma);
         if (Ch > '0' && Ch < '9')
-            return finishNumber();
+            return finishNumber(Ch);
         // Otherwise, expect a DWARF opcode.
         if (Ch == 'D')
             return finishOpcode();
-        return error(StartLoc, "Unexpected character: " + Ch);
+        return error(StartLoc, std::string("Unexpected character: ") + Ch);
     }
 
 public:
