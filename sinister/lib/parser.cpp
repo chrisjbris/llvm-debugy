@@ -7,7 +7,8 @@
 #include <cctype>
 #include <iomanip>
 #include <iostream>
-#include <llvm/ADT/SmallVector.h>
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/APInt.h"
 
 enum OperandType {
     uleb128,
@@ -220,37 +221,43 @@ std::unordered_map<uint8_t, std::string> g_OpcodeToStr = {
 };
 #undef HANDLE_DW_OP
 
-class Parser {
-    llvm::SmallVector<uint8_t> Output;
+static std::optional<uint8_t> getOpcode(std::string_view Name) {
+    auto R = g_StrToOpcode.find(std::string(Name));
+    if (R != g_StrToOpcode.end())
+        return R->second;
+    return std::nullopt;
+}
 
-    void parseOperands(uint8_t Opcode) {
-        auto const &OperandTypes = getOperandTypes(Opcode);
-        for (OperandType Ty : OperandTypes) {
-            // get it
 
-        }
-    }
-};
 
 struct SrcLoc {
-    unsigned Line;
-    unsigned Column;
+    unsigned Line = 1;
+    unsigned Column = 1;
 };
 
 struct Token {
     enum Type { Opcode, Int, Comma, Error } Ty;
     std::string_view lexeme;
     SrcLoc Loc;
-    Token(Type Type, std::string_view lexeme, SrcLoc Loc) :
-        Ty(Ty), lexeme(lexeme), Loc(Loc) {}
+    llvm::APInt Value;
+    Token(Type Type, std::string_view lexeme, SrcLoc Loc,
+          llvm::APInt Value = llvm::APInt()) :
+        Ty(Ty), lexeme(lexeme), Loc(Loc), Value(Value) {}
 };
 
 class Lexer {
     std::string_view Text;
-    unsigned Start;
-    unsigned Next;
+    unsigned Start = 0;
+    unsigned Next = 0;
     SrcLoc StartLoc;
     SrcLoc NextLoc;
+
+    Token error(SrcLoc Loc, std::string_view Err) {
+        std::cerr << "ERROR at line " << Loc.Line << ", col "
+                  << Loc.Column << ": " << Err << "\n";
+        return Token(Token::Error, std::string_view(), Loc);
+    }
+
     bool atEnd() { return Next >= Text.size(); }
     char peek() { return Text[Next]; }
     char advance() {
@@ -267,22 +274,58 @@ class Lexer {
     }
     void eatWhitespace() {
         while (!atEnd()) {
-            if (match('\n') || match('\r\n') || match('\v')) {
+            bool CR = match('\r');
+            if (match('\n') || CR && match('\n') || CR || match('\v')) {
                 NextLoc.Column = 1;
                 NextLoc.Line += 1;
                 continue;
-            } else if (peek() == ' ' || peek() == '\t') {
+            } else if (match(' ') || match('\t')) {
                 continue;
             }
+            // Not whitespace - end.
+            break;
         }
     }
 
+    std::string_view getCurrentSubstr() {
+        return Text.substr(Start, Next - Start);
+    }
+
     Token create(Token::Type Type) {
-      return Token(Type, Text.substr(Start, Next - Start), StartLoc);
+        return Token(Type, getCurrentSubstr(), StartLoc);
+    }
+    Token createOpcode(uint8_t Code) {
+        llvm::APInt Value(8, Code);
+        return Token(Token::Opcode, getCurrentSubstr(), StartLoc, Value);
+    }
+
+    Token finishNumber() {
+        return create(Token::Error);
+    }
+
+    Token finishOpcode() {
+        while(!atEnd()) {
+            char Ch = peek();
+            if (isspace(Ch))
+                break;
+            advance();
+        }
+        std::string_view Str = getCurrentSubstr();
+        if (auto Code = getOpcode(Str))
+            return createOpcode(*Code);
+        return error(StartLoc, "Unknown operation: '" + std::string(Str) + "'");
     }
 
     Token getNext() {
-        // TODO: Implement.
+        char Ch = advance();
+        if (Ch == ',')
+            return create(Token::Comma);
+        if (Ch > '0' && Ch < '9')
+            return finishNumber();
+        // Otherwise, expect a DWARF opcode.
+        if (Ch == 'D')
+            return finishOpcode();
+        return error(StartLoc, "Unexpected character: " + Ch);
     }
 
 public:
@@ -308,12 +351,6 @@ public:
     }
 };
 
-static std::optional<uint8_t> getOpcode(std::string_view Name) {
-    auto R = g_StrToOpcode.find(std::string(Name));
-    if (R != g_StrToOpcode.end())
-        return R->second;
-    return std::nullopt;
-}
 
 static std::string_view eatNextWord(std::string_view &Remaining) {
     unsigned Start = 0;
@@ -356,11 +393,14 @@ std::optional<std::vector<uint8_t>> parseExpression(
 
 void test() {
     std::string Expr = "DW_OP_breg1 DW_OP_lit0 DW_OP_plus DW_OP_stack_value";
-    if (auto Arr = parseExpression(Expr)) {
-        for (auto E : *Arr)
-            std::cout << std::hex << (uint32_t)E << " ";
-        std::cout << "\n:)\n";
+    std::cout << Expr << "\n";
+    Lexer L(Expr);
+    if (auto R = L.lex()) {
+        std::cout << ":)\n";
+        for (auto const &Tok : *R) {
+            std::cout << Tok.lexeme << "\n";
+        }
     } else {
-        std::cout << ":(\n";
+        std::cout << ":{\n";
     }
 }

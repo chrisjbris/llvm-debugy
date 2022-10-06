@@ -16,3 +16,9 @@ add_llvm_executable(sinister
         lib/parser.cpp
         lib/sinister/sinister.cpp
 )
+
+set(SINISTER_LINK_LIBS
+        LLVMSupport
+    )
+
+target_link_libraries(sinister ${SINISTER_LINK_LIBS})
