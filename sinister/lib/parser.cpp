@@ -228,8 +228,6 @@ static std::optional<uint8_t> getOpcode(std::string_view Name) {
     return std::nullopt;
 }
 
-
-
 struct SrcLoc {
     unsigned Line = 1;
     unsigned Column = 1;
@@ -383,46 +381,6 @@ public:
         return Output;
     }
 };
-
-
-static std::string_view eatNextWord(std::string_view &Remaining) {
-    unsigned Start = 0;
-    while (Start < Remaining.size()) {
-        char Ch = Remaining[Start];
-        // Just ignore commas for now.
-        if (!isspace(Ch) && Ch != ',')
-            break;
-        ++Start;
-    }
-    unsigned End = Start;
-    while (End < Remaining.size()) {
-        char Ch = Remaining[End];
-        if (isspace(Ch) || Ch == ',')
-            break;
-        ++End;
-    }
-
-    auto Result = Remaining.substr(Start, End - Start);
-    Remaining = Remaining.substr(End, Remaining.size() - End);
-    return Result;
-}
-
-// Dumb bare-bones string -> opcodes.
-// No useful errors, no non-opcode lexemes (e.g. uleb int operands).
-std::optional<std::vector<uint8_t>> parseExpression(
-                                        std::string_view ExpressionString) {
-    std::vector<uint8_t> Arr;
-    while (!ExpressionString.empty()) {
-        auto Word = eatNextWord(ExpressionString);
-        if (auto MaybeOpCode = getOpcode(Word)) {
-            Arr.push_back(*MaybeOpCode);
-        } else {
-            std::cerr << "Err: " << Word << " unknown opcode\n";
-            return std::nullopt; // Provide useful errors.
-        }
-    }
-    return Arr;
-}
 
 void test() {
     std::string Expr = "DW_OP_breg1 DW_OP_lit0 DW_OP_plus DW_OP_stack_value";
