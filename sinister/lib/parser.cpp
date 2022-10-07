@@ -234,14 +234,26 @@ struct SrcLoc {
 };
 
 struct Token {
-    enum Type { Opcode, Int, HexInt, Comma, Error } Ty;
+    enum Type { Opcode, Int, HexInt, Comma, Error, LParen, RParen } Ty;
     std::string_view lexeme;
     SrcLoc Loc;
     uint8_t Code;
-    Token(Type Type, std::string_view lexeme, SrcLoc Loc,
+    Token(Type Ty, std::string_view lexeme, SrcLoc Loc,
           uint8_t Code = 0) :
         Ty(Ty), lexeme(lexeme), Loc(Loc), Code(Code) {}
 };
+
+static Token error(SrcLoc Loc, std::string_view Msg) {
+    std::cerr << "ERROR at line " << Loc.Line << ", col "
+              << Loc.Column << ": " << Msg << "\n";
+    return Token(Token::Error, std::string_view(), Loc);
+}
+static Token error(SrcLoc Loc, std::string_view Expected, char Got) {
+    std::cerr << "ERROR at line " << Loc.Line << ", col "
+              << Loc.Column << ": Expected " << Expected << " but got "
+              << Got << "\n";
+    return Token(Token::Error, std::string_view(), Loc);
+}
 
 class Lexer {
     std::string_view Text;
@@ -249,19 +261,6 @@ class Lexer {
     unsigned Next = 0;
     SrcLoc StartLoc;
     SrcLoc NextLoc;
-
-    Token error(SrcLoc Loc, std::string_view Msg) {
-        std::cerr << "ERROR at line " << Loc.Line << ", col "
-                  << Loc.Column << ": " << Msg << "\n";
-        return Token(Token::Error, std::string_view(), Loc);
-    }
-
-    Token error(SrcLoc Loc, std::string_view Expected, char Got) {
-        std::cerr << "ERROR at line " << Loc.Line << ", col "
-                  << Loc.Column << ": Expected " << Expected << " but got "
-                  << Got << "\n";
-        return Token(Token::Error, std::string_view(), Loc);
-    }
 
     bool atEnd() { return Next >= Text.size(); }
     char peek() { return Text[Next]; }
@@ -346,6 +345,10 @@ class Lexer {
         char Ch = advance();
         if (Ch == ',')
             return create(Token::Comma);
+        if (Ch == '(')
+            return create(Token::LParen);
+        if (Ch == ')')
+            return create(Token::RParen);
         if (Ch >= '0' && Ch <= '9')
             return finishNumber(Ch);
         // Otherwise, expect a DWARF opcode.
@@ -377,16 +380,101 @@ public:
     }
 };
 
-void test() {
-    std::string Expr = "DW_OP_breg1, DW_OP_const1u, 0, DW_OP_plus, DW_OP_stack_value";
-    std::cout << Expr << "\n";
-    Lexer L(Expr);
-    if (auto R = L.lex()) {
-        std::cout << ":)\n";
-        for (auto const &Tok : *R) {
-            if (Tok.Ty != Token::Comma)
-                std::cout << Tok.lexeme << "\n";
+struct Parser {
+    llvm::SmallVector<Token> const &Toks;
+    llvm::SmallVector<uint8_t> Result;
+    unsigned Next = 0;
+
+    bool atEnd() { return Next >= Toks.size(); }
+    Token const &peek() { return Toks[Next]; }
+    Token const &previous() { return Toks[Next - 1]; }
+    Token const &advance() {
+        Token const &Tok = peek();
+        ++Next;
+        return Tok;
+    }
+    bool consume(Token::Type Ty, std::string const &Err) {
+        Token const &Tok = advance();
+        if (Tok.Ty == Ty)
+            return true;
+        error(Tok.Loc, Err);
+        return false;
+    }
+    bool encodeOperation() {
+        // Already eaten the first tok.
+        Token const &OpTok = previous();
+        assert(OpTok.Ty == Token::Opcode);
+
+        // Add the opcode.
+        Result.push_back(OpTok.Code);
+
+        auto const &Operands = getOperandTypes(OpTok.Code);
+
+        // No parens for zero-operand opcodes.
+        if (Operands.empty()) {
+            // Give helpful error if there's a '('.
+            if (!atEnd() && peek().Ty == Token::LParen) {
+                error(peek().Loc, "Don't use parens after zero-operand opcodes");
+                return false;
+            }
+            return true;
         }
+
+        if (!consume(Token::LParen, "Expected '(' after opcode with operands"))
+            return false;
+
+        // Parse and encode the operands.
+        // Pos: one-based operand index.
+        int Pos = 0;
+        for (OperandType OperandTy : Operands) {
+            ++Pos;
+            // TODO: Acutally encode and check for right sized ints.
+            // Obvs this is dumb, to just test (also don't forget HexInt).
+            if (!consume(Token::Int, "Expected int param"))
+                return false;
+            // TODO: Could give useful hint about num operands.
+            if (Pos != Operands.size())
+                if (!consume(Token::Comma, "Expected comma after operand"))
+                    return false;
+        }
+
+        if (!consume(Token::RParen, "Expected ')' after operand list"))
+            return false;
+
+        return /*Success*/ true;
+    }
+
+public:
+    Parser(llvm::SmallVector<Token> const &Toks) : Toks(Toks) {}
+    std::optional<llvm::SmallVector<uint8_t>> parse() {
+        while (!atEnd()) {
+            if (!consume(Token::Opcode, "Expected an opcode"))
+                return std::nullopt;
+            if (!encodeOperation())
+                return std::nullopt;
+        }
+        return Result;
+    }
+};
+
+void test() {
+    std::string Expr = "DW_OP_breg1(0) DW_OP_const1u(0) DW_OP_plus DW_OP_stack_value";
+    std::cout << "Expr is\n" << Expr << "\n";
+    Lexer L(Expr);
+    std::cout << "== Lex ==\n";
+    if (auto R = L.lex()) {
+        auto Vec = *R;
+        std::cout << ":)\n";
+        for (auto const &Tok : Vec) {
+            std::cout << Tok.lexeme << " ";
+        }
+
+        std::cout << "\n== Parse ==\n";
+        Parser P(Vec);
+        if (P.parse())
+            std::cout << "Worked!\n";
+        else
+            std::cout << "borked :(\n";
     } else {
         std::cout << ":{\n";
     }
