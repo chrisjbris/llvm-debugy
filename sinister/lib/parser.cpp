@@ -312,13 +312,8 @@ class Lexer {
             char Ch = peek();
             if (isspace(Ch))
                 break;
-            if (Hex) {
-                if (!std::isxdigit(Ch))
-                    return error(NextLoc, "hex digit", Ch);
-            } else {
-                if (!std::isdigit(Ch))
-                    return error(NextLoc, "digit", Ch);
-            }
+            if ((Hex && !std::isxdigit(Ch)) || !std::isdigit(Ch))
+                break;
             advance();
         }
         if (Hex) {
@@ -337,7 +332,7 @@ class Lexer {
             if (isspace(Ch))
                 break;
             if (!std::isalnum(Ch) && Ch != '_')
-                return error(NextLoc, "alnum or _", Ch);
+                break;
             advance();
         }
         std::string_view Str = getCurrentSubstr();
@@ -351,7 +346,7 @@ class Lexer {
         char Ch = advance();
         if (Ch == ',')
             return create(Token::Comma);
-        if (Ch > '0' && Ch < '9')
+        if (Ch >= '0' && Ch <= '9')
             return finishNumber(Ch);
         // Otherwise, expect a DWARF opcode.
         if (Ch == 'D')
@@ -383,13 +378,14 @@ public:
 };
 
 void test() {
-    std::string Expr = "DW_OP_breg1 DW_OP_lit0 DW_OP_plus DW_OP_stack_value";
+    std::string Expr = "DW_OP_breg1, DW_OP_const1u, 0, DW_OP_plus, DW_OP_stack_value";
     std::cout << Expr << "\n";
     Lexer L(Expr);
     if (auto R = L.lex()) {
         std::cout << ":)\n";
         for (auto const &Tok : *R) {
-            std::cout << Tok.lexeme << "\n";
+            if (Tok.Ty != Token::Comma)
+                std::cout << Tok.lexeme << "\n";
         }
     } else {
         std::cout << ":{\n";
