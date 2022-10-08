@@ -7,8 +7,11 @@
 #include <cctype>
 #include <iomanip>
 #include <iostream>
+#include <sstream>
+#include <numeric>
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/APInt.h"
+#include "llvm/ADT/StringRef.h"
 
 enum OperandType {
     uleb128,
@@ -243,16 +246,9 @@ struct Token {
         Ty(Ty), lexeme(lexeme), Loc(Loc), Code(Code) {}
 };
 
-static Token error(SrcLoc Loc, std::string_view Msg) {
+static void printError(SrcLoc Loc, std::string_view Msg) {
     std::cerr << "ERROR at line " << Loc.Line << ", col "
               << Loc.Column << ": " << Msg << "\n";
-    return Token(Token::Error, std::string_view(), Loc);
-}
-static Token error(SrcLoc Loc, std::string_view Expected, char Got) {
-    std::cerr << "ERROR at line " << Loc.Line << ", col "
-              << Loc.Column << ": Expected " << Expected << " but got "
-              << Got << "\n";
-    return Token(Token::Error, std::string_view(), Loc);
 }
 
 class Lexer {
@@ -276,8 +272,17 @@ class Lexer {
         advance();
         return true;
     }
-    void advanceToSpace() {
-
+    static Token error(SrcLoc Loc, std::string_view Msg) {
+        printError(Loc, Msg);
+        return Token(Token::Error, std::string_view(), Loc);
+    }
+    static Token error(SrcLoc Loc, std::string_view Expected, char Got) {
+        std::stringstream  Err;
+        Err << "ERROR at line " << Loc.Line << ", col "
+            << Loc.Column << ": Expected " << Expected << " but got "
+            << Got << "\n";
+        printError(Loc, Err.str());
+        return Token(Token::Error, std::string_view(), Loc);
     }
     void eatWhitespace() {
         while (!atEnd()) {
@@ -380,11 +385,74 @@ public:
     }
 };
 
+#if 0 // evolution of byte-count function, leaving here till everything works.
+// Can't use constexpr unfortunately.
+const double DecDigitToBitCountMultiplier = std::log(10.) / std::log(2.);
+const double HexDigitToBitCountMultiplier = std::log(10.) / std::log(2.);
+unsigned decBytesMax(unsigned NumDigits) {
+    // Ignore stupid input as it could wrap our bitcount. This number is lower
+    // than necessary (2 << 32 - 1 / log2(10)).
+    if (NumDigits > 120000000)
+        return 0;
+    double NumBits = std::ceil(NumDigits * DecDigitToBitCountMultiplier);
+    unsigned NumBytes = static_cast<unsigned>(NumBits) / 8;
+    return NumBytes;
+}
+//1073741823.75
+unsigned hexBytesMax(unsigned NumDigits) {
+    // Ignore stupid input as it could wrap our bitcount. This number is lower
+    // than necessary (2 << 32 - 1 / log2(16)).
+    if (NumDigits > 900000000)
+        return 0;
+    double NumBits = std::ceil(NumDigits * HexDigitToBitCountMultiplier);
+    unsigned NumBytes = static_cast<unsigned>(NumBits) / 8;
+    return NumBytes;
+}
+unsigned maxBytes(unsigned NumDigits, unsigned Radix) {
+    double Multiplier = std::log(Radix) / std::log(2.);
+    if (NumDigits >= std::numeric_limits<unsigned>::max() / Multiplier)
+        return 0;
+    double NumBits = std::ceil(NumDigits * Multiplier);
+    return static_cast<unsigned>(NumBits) / 8;
+}
+#endif
+// Inspired by https://www.exploringbinary.com/number-of-bits-in-a-decimal-integer
+// FIXME: this only works for unsigned.
+// also Hex is "just" * 4. But this generalisation is probably fine.
+// thought: allow negative hex or only positive hex? (i think positive only)
+//
+template<unsigned Radix>
+unsigned maxBytes(unsigned NumDigits) {
+    const double Multiplier = std::log(Radix) / std::log(2.);
+    const double MaxDigits = std::numeric_limits<unsigned>::max() / Multiplier;
+    if (NumDigits >= MaxDigits)
+        return 0;
+    double NumBits = std::ceil(NumDigits * Multiplier);
+    return static_cast<unsigned>(NumBits + 7) / 8;
+}
+
+static llvm::StringRef toRef(std::string_view Str) {
+    return llvm::StringRef(Str.data(), Str.size());
+}
+
+static void encodeAPInt(llvm::APInt const &Int,
+                        llvm::SmallVector<uint8_t> *Target) {
+    char const* RawData = (char const *)Int.getRawData();
+    int NumBytes = Int.getBitWidth() + 7 / 8;
+    for (int i = 0; i < NumBytes; ++i)
+        Target->push_back(RawData[i]);
+}
+
+// FIXME: Reduce code by doing lex + parse + encode in one pass.
 struct Parser {
     llvm::SmallVector<Token> const &Toks;
     llvm::SmallVector<uint8_t> Result;
     unsigned Next = 0;
-
+    static bool error(SrcLoc Loc, std::string_view Msg) {
+        std::cerr << "ERROR at line " << Loc.Line << ", col "
+              << Loc.Column << ": " << Msg << "\n";
+        return false;
+    }
     bool atEnd() { return Next >= Toks.size(); }
     Token const &peek() { return Toks[Next]; }
     Token const &previous() { return Toks[Next - 1]; }
@@ -400,6 +468,66 @@ struct Parser {
         error(Tok.Loc, Err);
         return false;
     }
+
+    static bool operandValueFits(unsigned TypeBitWidth, Token Operand,
+                                 unsigned BitsNeededForValue) {
+        // TODO: Make the error functions less awkward to use.
+        if (BitsNeededForValue > TypeBitWidth)
+            return error(Operand.Loc, "Operand value too large. It requires "
+                                      + std::to_string(BitsNeededForValue)
+                                      + " bits but the operand type is "
+                                      + std::to_string(TypeBitWidth)
+                                      + " bits wide.");
+        return true;
+    }
+
+    // TODO: Remove the bit-width calc functions. Test this stuff. Then implement
+    // other int encodings. Then done?
+    bool encodeUnsignedInt(unsigned TypeBitWidth, Token Operand, uint8_t Radix) {
+        // We've already checked it will fit.
+        llvm::APInt Value(TypeBitWidth, toRef(Operand.lexeme), Radix);
+        encodeAPInt(Value, &Result);
+        return true;
+    }
+
+    bool encodeOperand(OperandType Ty, Token Operand) {
+        uint8_t Radix = Operand.Ty == Token::Int ? 10 : 16;
+        unsigned BitsNeeded =
+                    llvm::APInt::getBitsNeeded(toRef(Operand.lexeme), Radix);
+        switch (Ty) {
+            case s1: assert(false && "TODO"); return false;
+            case s2: assert(false && "TODO"); return false;
+            case s4: assert(false && "TODO"); return false;
+            case s8: assert(false && "TODO"); return false;
+            case u1:
+                return operandValueFits(8, Operand, BitsNeeded)
+                       && encodeUnsignedInt(8, Operand, Radix);
+            case u2:
+                return operandValueFits(16, Operand, BitsNeeded)
+                       && encodeUnsignedInt(16, Operand, Radix);
+            case u4:
+                return operandValueFits(32, Operand, BitsNeeded)
+                       && encodeUnsignedInt(32, Operand, Radix);
+            case u8:
+                return operandValueFits(64, Operand, BitsNeeded)
+                       && encodeUnsignedInt(64, Operand, Radix);
+            case addr:
+                // FIXME: Determine / specify bit width of target address.
+                // Assume 64-bit for now.
+                return operandValueFits(64, Operand, BitsNeeded)
+                       && encodeUnsignedInt(64, Operand, Radix);
+            case word:
+                // FIXME: Determine / specify DWARF bit-mode. Assume 32-bit mode
+                // for now.
+                return operandValueFits(32, Operand, BitsNeeded)
+                       && encodeUnsignedInt(32, Operand, Radix);
+            case uleb128: assert(false && "TODO"); return false;
+            case sleb128: assert(false && "TODO"); return false;
+            case variable: assert(false && "TODO"); return false;
+        };
+        return false;
+    }
+
     bool encodeOperation() {
         // Already eaten the first tok.
         Token const &OpTok = previous();
@@ -432,6 +560,10 @@ struct Parser {
             // Obvs this is dumb, to just test (also don't forget HexInt).
             if (!consume(Token::Int, "Expected int param"))
                 return false;
+
+            if (!encodeOperand(OperandTy, previous()))
+                return false;
+
             // TODO: Could give useful hint about num operands.
             if (Pos != Operands.size())
                 if (!consume(Token::Comma, "Expected comma after operand"))
@@ -458,7 +590,7 @@ public:
 };
 
 void test() {
-    std::string Expr = "DW_OP_breg1(0) DW_OP_const1u(0) DW_OP_plus DW_OP_stack_value";
+    std::string Expr = "DW_OP_reg1 DW_OP_const1s(-1) DW_OP_plus DW_OP_stack_value";
     std::cout << "Expr is\n" << Expr << "\n";
     Lexer L(Expr);
     std::cout << "== Lex ==\n";
