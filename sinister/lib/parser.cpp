@@ -244,6 +244,11 @@ struct Token {
     Token(Type Ty, std::string_view lexeme, SrcLoc Loc,
           uint8_t Code = 0) :
         Ty(Ty), lexeme(lexeme), Loc(Loc), Code(Code) {}
+
+    uint8_t radix() const {
+        assert(Ty == Int || Ty == HexInt);
+        return Ty == Token::Int ? 10 : 16;
+     }
 };
 
 static void printError(SrcLoc Loc, std::string_view Msg) {
@@ -311,19 +316,22 @@ class Lexer {
     }
 
     Token finishNumber(char First) {
+        bool Negative = First == '-';
+        if (Negative && match('0') && match('x'))
+            return error(StartLoc, "Negative hexidecimal literals unsupported");
         bool Hex = First == '0' && match('x');
         while(!atEnd()) {
             char Ch = peek();
             if (isspace(Ch))
                 break;
-            if ((Hex && !std::isxdigit(Ch)) || !std::isdigit(Ch))
+            if ((!Hex && !std::isdigit(Ch)) || (Hex && !std::isxdigit(Ch)))
                 break;
             advance();
         }
         if (Hex) {
             // Chop off the 0x.
-            std::string_view Str = getCurrentSubstr().substr(2);
-            return Token(Token::HexInt, Str, StartLoc);
+            Start += 2;
+            return create(Token::HexInt);
         } else {
             return create(Token::Int);
         }
@@ -354,7 +362,7 @@ class Lexer {
             return create(Token::LParen);
         if (Ch == ')')
             return create(Token::RParen);
-        if (Ch >= '0' && Ch <= '9')
+        if (Ch == '-' || Ch >= '0' && Ch <= '9')
             return finishNumber(Ch);
         // Otherwise, expect a DWARF opcode.
         if (Ch == 'D')
@@ -468,59 +476,57 @@ struct Parser {
         error(Tok.Loc, Err);
         return false;
     }
-
+    bool match(Token::Type Ty) {
+        if (peek().Ty != Ty)
+            return false;
+        advance();
+        return true;
+    }
     static bool operandValueFits(unsigned TypeBitWidth, Token Operand,
-                                 unsigned BitsNeededForValue) {
+                                 bool Signed) {
+        unsigned BitsNeeded =
+          llvm::APInt::getBitsNeeded(toRef(Operand.lexeme), Operand.radix());
+        // getBitsNeeded counts strings without '-' as unsigned. Hex is parsed
+        // as unsigned and bitcast to signed.
+        if (Signed && Operand.lexeme[0] != '-' && Operand.Ty != Token::HexInt)
+            BitsNeeded += 1;
         // TODO: Make the error functions less awkward to use.
-        if (BitsNeededForValue > TypeBitWidth)
-            return error(Operand.Loc, "Operand value too large. It requires "
-                                      + std::to_string(BitsNeededForValue)
+        if (BitsNeeded > TypeBitWidth)
+            return error(Operand.Loc, "Operand value too large. It requires " +
+                                        std::to_string(BitsNeeded)
                                       + " bits but the operand type is "
                                       + std::to_string(TypeBitWidth)
                                       + " bits wide.");
         return true;
     }
 
-    // TODO: Remove the bit-width calc functions. Test this stuff. Then implement
-    // other int encodings. Then done?
-    bool encodeUnsignedInt(unsigned TypeBitWidth, Token Operand, uint8_t Radix) {
+    bool encodeInt(Token Operand, unsigned TypeBitWidth, bool Signed) {
+        if (!operandValueFits(TypeBitWidth, Operand, Signed))
+            return false;
         // We've already checked it will fit.
-        llvm::APInt Value(TypeBitWidth, toRef(Operand.lexeme), Radix);
+        llvm::APInt Value(TypeBitWidth, toRef(Operand.lexeme), Operand.radix());
         encodeAPInt(Value, &Result);
         return true;
     }
 
     bool encodeOperand(OperandType Ty, Token Operand) {
-        uint8_t Radix = Operand.Ty == Token::Int ? 10 : 16;
-        unsigned BitsNeeded =
-                    llvm::APInt::getBitsNeeded(toRef(Operand.lexeme), Radix);
         switch (Ty) {
-            case s1: assert(false && "TODO"); return false;
-            case s2: assert(false && "TODO"); return false;
-            case s4: assert(false && "TODO"); return false;
-            case s8: assert(false && "TODO"); return false;
-            case u1:
-                return operandValueFits(8, Operand, BitsNeeded)
-                       && encodeUnsignedInt(8, Operand, Radix);
-            case u2:
-                return operandValueFits(16, Operand, BitsNeeded)
-                       && encodeUnsignedInt(16, Operand, Radix);
-            case u4:
-                return operandValueFits(32, Operand, BitsNeeded)
-                       && encodeUnsignedInt(32, Operand, Radix);
-            case u8:
-                return operandValueFits(64, Operand, BitsNeeded)
-                       && encodeUnsignedInt(64, Operand, Radix);
+            case s1: return encodeInt(Operand,  8, true );
+            case s2: return encodeInt(Operand, 16, true );
+            case s4: return encodeInt(Operand, 32, true );
+            case s8: return encodeInt(Operand, 64, true );
+            case u1: return encodeInt(Operand,  8, false);
+            case u2: return encodeInt(Operand, 16, false);
+            case u4: return encodeInt(Operand, 32, false);
+            case u8: return encodeInt(Operand, 64, false);
             case addr:
                 // FIXME: Determine / specify bit width of target address.
                 // Assume 64-bit for now.
-                return operandValueFits(64, Operand, BitsNeeded)
-                       && encodeUnsignedInt(64, Operand, Radix);
+                return encodeInt(Operand, 64, false);
             case word:
                 // FIXME: Determine / specify DWARF bit-mode. Assume 32-bit mode
                 // for now.
-                return operandValueFits(32, Operand, BitsNeeded)
-                       && encodeUnsignedInt(32, Operand, Radix);
+                return encodeInt(Operand, 32, false);
             case uleb128: assert(false && "TODO"); return false;
             case sleb128: assert(false && "TODO"); return false;
             case variable: assert(false && "TODO"); return false;
@@ -557,8 +563,7 @@ struct Parser {
         for (OperandType OperandTy : Operands) {
             ++Pos;
             // TODO: Acutally encode and check for right sized ints.
-            // Obvs this is dumb, to just test (also don't forget HexInt).
-            if (!consume(Token::Int, "Expected int param"))
+            if (!match(Token::HexInt) && !consume(Token::Int, "Expected int param"))
                 return false;
 
             if (!encodeOperand(OperandTy, previous()))
@@ -590,7 +595,7 @@ public:
 };
 
 void test() {
-    std::string Expr = "DW_OP_reg1 DW_OP_const1s(-1) DW_OP_plus DW_OP_stack_value";
+    std::string Expr = "DW_OP_reg1 DW_OP_const1s(0xff) DW_OP_plus DW_OP_stack_value";
     std::cout << "Expr is\n" << Expr << "\n";
     Lexer L(Expr);
     std::cout << "== Lex ==\n";
