@@ -417,7 +417,7 @@ static llvm::StringRef toRef(std::string_view Str) {
 static void encodeAPInt(llvm::APInt const &Int,
                         std::vector<uint8_t> *Target) {
   char const *RawData = (char const *)Int.getRawData();
-  int NumBytes = Int.getBitWidth() + 7 / 8;
+  int NumBytes = (Int.getBitWidth() + 7) / 8;
   for (int i = 0; i < NumBytes; ++i)
     Target->push_back(RawData[i]);
 }
