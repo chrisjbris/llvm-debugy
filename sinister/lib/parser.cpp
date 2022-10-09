@@ -484,12 +484,16 @@ struct Parser {
         return true;
     }
 
+    static bool isNegative(Token Operand) {
+        return Operand.lexeme[0] == '-';
+    }
+
     static unsigned getBitsNeededForOperand(Token Op, bool Signed) {
         unsigned BitsNeeded =
             llvm::APInt::getBitsNeeded(toRef(Op.lexeme), Op.radix());
         // getBitsNeeded counts strings without '-' as unsigned. Hex is parsed
         // as unsigned and bitcast to signed.
-        if (Signed && Op.lexeme[0] != '-' && Op.Ty != Token::HexInt)
+        if (Signed && isNegative(Op) && Op.Ty != Token::HexInt)
             BitsNeeded += 1;
         return BitsNeeded;
     }
@@ -507,6 +511,9 @@ struct Parser {
     }
 
     bool encodeInt(Token Operand, unsigned TypeBitWidth, bool Signed) {
+        if (!Signed && isNegative(Operand))
+            return error(Operand.Loc, "Expected unsigned operand");
+
         if (!operandValueFits(TypeBitWidth, Operand, Signed))
             return false;
         // We've already checked it will fit.
@@ -516,6 +523,9 @@ struct Parser {
     }
 
     bool encodeLEB128(Token Operand, bool Signed) {
+        if (!Signed && isNegative(Operand))
+            return error(Operand.Loc, "Expected unsigned operand");
+
         unsigned BitsNeeded = getBitsNeededForOperand(Operand, Signed);
         // zext size to a multiple of 7.
         BitsNeeded += 7 - (BitsNeeded % 7);
@@ -533,6 +543,7 @@ struct Parser {
         } while (GroupStart != Value.getBitWidth());
         return true;
     }
+
 
     bool encodeOperand(OperandType Ty, Token Operand) {
         switch (Ty) {
