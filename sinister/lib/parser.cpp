@@ -455,6 +455,7 @@ static void encodeAPInt(llvm::APInt const &Int,
 struct Parser {
     llvm::SmallVector<Token> const &Toks;
     llvm::SmallVector<uint8_t> Result;
+
     unsigned Next = 0;
     static bool error(SrcLoc Loc, std::string_view Msg) {
         std::cerr << "ERROR at line " << Loc.Line << ", col "
@@ -482,14 +483,19 @@ struct Parser {
         advance();
         return true;
     }
-    static bool operandValueFits(unsigned TypeBitWidth, Token Operand,
-                                 bool Signed) {
+
+    static bool getBitsNeededForOperand(Token Op, bool Signed) {
         unsigned BitsNeeded =
-          llvm::APInt::getBitsNeeded(toRef(Operand.lexeme), Operand.radix());
+            llvm::APInt::getBitsNeeded(toRef(Op.lexeme), Op.radix());
         // getBitsNeeded counts strings without '-' as unsigned. Hex is parsed
         // as unsigned and bitcast to signed.
-        if (Signed && Operand.lexeme[0] != '-' && Operand.Ty != Token::HexInt)
+        if (Signed && Op.lexeme[0] != '-' && Op.Ty != Token::HexInt)
             BitsNeeded += 1;
+        return  BitsNeeded;
+    }
+    static bool operandValueFits(unsigned TypeBitWidth, Token Operand,
+                                 bool Signed) {
+        unsigned BitsNeeded = getBitsNeededForOperand(Operand, Signed);
         // TODO: Make the error functions less awkward to use.
         if (BitsNeeded > TypeBitWidth)
             return error(Operand.Loc, "Operand value too large. It requires " +
@@ -506,6 +512,31 @@ struct Parser {
         // We've already checked it will fit.
         llvm::APInt Value(TypeBitWidth, toRef(Operand.lexeme), Operand.radix());
         encodeAPInt(Value, &Result);
+        return true;
+    }
+
+    bool encodeLEB128(Token Operand, bool Signed) {
+        unsigned BitsNeeded = getBitsNeededForOperand(Operand, Signed);
+        // zext size to a multiple of 7.
+        BitsNeeded += 7 - BitsNeeded % 7;
+        llvm::APInt Value(BitsNeeded, toRef(Operand.lexeme), Operand.radix());
+
+        if (Signed) {
+            // SLEB128 encodes two's complement of value.
+            Value.flipAllBits();
+            Value += 1;
+        }
+
+        // Next group of 7 bytes start position.
+        unsigned GroupStart = 0;
+        do {
+            uint8_t Byte = Value.extractBitsAsZExtValue(0, 7);
+            GroupStart += 7;
+            // if not finished, set high bit of byte.
+            if (GroupStart != Value.getBitWidth())
+                Byte |= 0b10000000;
+            Result.push_back(Byte);
+        } while (GroupStart != Value.getBitWidth());
         return true;
     }
 
@@ -527,12 +558,13 @@ struct Parser {
                 // FIXME: Determine / specify DWARF bit-mode. Assume 32-bit mode
                 // for now.
                 return encodeInt(Operand, 32, false);
-            case uleb128: assert(false && "TODO"); return false;
-            case sleb128: assert(false && "TODO"); return false;
+            case uleb128: return encodeLEB128(Operand, false);
+            case sleb128: return encodeLEB128(Operand, true);
             case variable: assert(false && "TODO"); return false;
         };
         return false;
     }
+
 
     bool encodeOperation() {
         // Already eaten the first tok.
@@ -566,6 +598,7 @@ struct Parser {
             if (!match(Token::HexInt) && !consume(Token::Int, "Expected int param"))
                 return false;
 
+            unsigned ResultsStartPos = Result.size();
             if (!encodeOperand(OperandTy, previous()))
                 return false;
 
@@ -608,9 +641,13 @@ void test() {
 
         std::cout << "\n== Parse ==\n";
         Parser P(Vec);
-        if (P.parse())
+        if (auto R = P.parse()) {
             std::cout << "Worked!\n";
-        else
+            auto Vec = *R;
+            for (uint8_t Byte : Vec )
+                std::cout << std::hex << (unsigned)Byte << " ";
+            std::cout << "\n";
+        } else
             std::cout << "borked :(\n";
     } else {
         std::cout << ":{\n";
