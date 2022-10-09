@@ -11,18 +11,25 @@
 //===----------------------------------------------------------------------===//
 #include <cstdint>
 #include <iostream>
+#include <optional>
 #include <vector>
 
 #include "sinister/DwarfExecutor.h"
 #include "sinister/sinister.h"
-
-
+#include "sinister/TextToDwarf.h"
 
 
 auto main(int argc, const char **argv) -> int {
 
-//  {const1-byte, 1, const1-byte, 2, add, stack_value}
-std::vector<uint8_t> *DemoProg = new std::vector<uint8_t>({0x08, 0x0a, 0x08, 0x02, 0x22, 0x9f});
+    std::vector<uint8_t> *DemoProg = new std::vector<uint8_t>();
+    {
+        std::string DemoExpression =
+            "DW_OP_const1u(1) DW_OP_const1u(2) DW_OP_plus DW_OP_stack_value";
+        auto Result = parseDwarfExpression(DemoExpression);
+        if (!Result.has_value())
+            return -1;
+        *DemoProg = std::move(Result.value());
+    }
 
     sinister::DwarfExecutor DE;
     DE.SetProgram(DemoProg);
