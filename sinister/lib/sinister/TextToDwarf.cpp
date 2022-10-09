@@ -427,6 +427,16 @@ struct Parser {
   llvm::SmallVector<Token> const &Toks;
   std::vector<uint8_t> Result;
 
+  llvm::APInt PreviousOperandValue;
+  /// Save operand value so that variable-length encoded operands that have a
+  /// length specified by this operand can read it.
+  void saveOperandValue(llvm::APInt const &Value) {
+    PreviousOperandValue = Value;
+  }
+  llvm::APInt const &getPreviousOperandValue() {
+    return PreviousOperandValue;
+  }
+
   unsigned Next = 0;
   static bool error(SrcLoc Loc, std::string_view Msg) {
     std::cerr << "ERROR at line " << Loc.Line << ", col " << Loc.Column << ": "
@@ -487,6 +497,7 @@ struct Parser {
       return false;
     // We've already checked it will fit.
     llvm::APInt Value(TypeBitWidth, toRef(Operand.lexeme), Operand.radix());
+    saveOperandValue(Value);
     encodeAPInt(Value, &Result);
     return true;
   }
@@ -496,9 +507,11 @@ struct Parser {
       return error(Operand.Loc, "Expected unsigned operand");
 
     unsigned BitsNeeded = getBitsNeededForOperand(Operand, Signed);
-    // zext size to a multiple of 7.
-    BitsNeeded += 7 - (BitsNeeded % 7);
     llvm::APInt Value(BitsNeeded, toRef(Operand.lexeme), Operand.radix());
+    saveOperandValue(Value);
+    // zext size to a multiple of 7. Do this after saving the operand value
+    // because it's just an implementation detail for the encoding algorithm.
+    Value = Value.zext(BitsNeeded + 7 - (BitsNeeded % 7));
 
     // Next group of 7 bytes start position.
     unsigned GroupStart = 0;
@@ -510,6 +523,30 @@ struct Parser {
         Byte |= 0b10000000;
       Result.push_back(Byte);
     } while (GroupStart != Value.getBitWidth());
+    return true;
+  }
+
+  bool encodeVariableLengthOperand(Token Operand) {
+    llvm::APInt const &Previous = getPreviousOperandValue();
+    if (Previous.getBitWidth() > 64)
+      return error(Operand.Loc, "The size operand for this variable-length "
+                                "operand (the preceeding operand) is larger "
+                                "than 64 bits, which isn't supported yet");
+
+    // Previous operand encodes the number of bytes of this operand.
+    uint64_t BitWidth = Previous.getZExtValue() * 8;
+
+    if (isNegative(Operand))
+      return error(Operand.Loc, "Expected unsigned operand");
+    if (!operandValueFits(BitWidth, Operand, /*Signed*/false))
+      return false; // Error already printed.
+
+    llvm::APInt Value(BitWidth, toRef(Operand.lexeme), Operand.radix());
+    // We don't really need to do this, as a variable length int is not ever
+    // used to specify the length of another. Do it anyway, as it's one less
+    // gotcha if we do something weird later.
+    saveOperandValue(Value);
+    encodeAPInt(Value, &Result);
     return true;
   }
 
@@ -544,8 +581,11 @@ struct Parser {
     case sleb128:
       return encodeLEB128(Operand, true);
     case variable:
-      assert(false && "TODO");
-      return false;
+      // FIXME: This doesn't help much with DW_OP_entry_value, which essentially
+      // expects another DWARF expression as its operand, which is then encoded
+      // with the operand pair. DW_OP_const_type also needs a DIE reference
+      // as the first operand, which will require some extra scaffolding.
+      return encodeVariableLengthOperand(Operand);
     };
     return false;
   }
