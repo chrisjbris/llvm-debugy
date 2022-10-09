@@ -11,9 +11,11 @@
 // valid.
 //
 //===----------------------------------------------------------------------===//
-#include <stdlib.h>
+#include <optional>
 #include <string>
 #include <vector>
 
-
-std::vector<uint8_t> StringToBytes(std::string &Input);
+/// Parse the DWARF expression string and encode the result. Returns nullopt
+/// and prints errors to stderr if there are any problems.
+std::optional<std::vector<uint8_t>>
+parseDwarfExpression(std::string const &Input);
