@@ -484,14 +484,14 @@ struct Parser {
         return true;
     }
 
-    static bool getBitsNeededForOperand(Token Op, bool Signed) {
+    static unsigned getBitsNeededForOperand(Token Op, bool Signed) {
         unsigned BitsNeeded =
             llvm::APInt::getBitsNeeded(toRef(Op.lexeme), Op.radix());
         // getBitsNeeded counts strings without '-' as unsigned. Hex is parsed
         // as unsigned and bitcast to signed.
         if (Signed && Op.lexeme[0] != '-' && Op.Ty != Token::HexInt)
             BitsNeeded += 1;
-        return  BitsNeeded;
+        return BitsNeeded;
     }
     static bool operandValueFits(unsigned TypeBitWidth, Token Operand,
                                  bool Signed) {
@@ -518,19 +518,13 @@ struct Parser {
     bool encodeLEB128(Token Operand, bool Signed) {
         unsigned BitsNeeded = getBitsNeededForOperand(Operand, Signed);
         // zext size to a multiple of 7.
-        BitsNeeded += 7 - BitsNeeded % 7;
+        BitsNeeded += 7 - (BitsNeeded % 7);
         llvm::APInt Value(BitsNeeded, toRef(Operand.lexeme), Operand.radix());
-
-        if (Signed) {
-            // SLEB128 encodes two's complement of value.
-            Value.flipAllBits();
-            Value += 1;
-        }
 
         // Next group of 7 bytes start position.
         unsigned GroupStart = 0;
         do {
-            uint8_t Byte = Value.extractBitsAsZExtValue(0, 7);
+            uint8_t Byte = Value.extractBitsAsZExtValue(7, GroupStart);
             GroupStart += 7;
             // if not finished, set high bit of byte.
             if (GroupStart != Value.getBitWidth())
@@ -628,7 +622,8 @@ public:
 };
 
 void test() {
-    std::string Expr = "DW_OP_reg1 DW_OP_const1s(0xff) DW_OP_plus DW_OP_stack_value";
+    //std::string Expr = "DW_OP_reg1 DW_OP_const1s(0xff) DW_OP_plus DW_OP_stack_value";
+    std::string Expr = "DW_OP_constu(624485) DW_OP_consts(-123456)";
     std::cout << "Expr is\n" << Expr << "\n";
     Lexer L(Expr);
     std::cout << "== Lex ==\n";
