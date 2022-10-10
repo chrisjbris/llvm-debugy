@@ -309,7 +309,13 @@ class Lexer {
   void eatWhitespace() {
     while (!atEnd()) {
       bool CR = match('\r');
+      bool Comment = match('#');
       if (match('\n') || CR && match('\n') || CR || match('\v')) {
+        NextLoc.Column = 1;
+        NextLoc.Line += 1;
+        continue;
+      } else if(Comment) {
+        std::cout << "Encountered comment.\n";
         NextLoc.Column = 1;
         NextLoc.Line += 1;
         continue;
