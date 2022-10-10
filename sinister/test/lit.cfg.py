@@ -14,6 +14,7 @@ from lit.llvm.subst import ToolSubst
 # name: The name of this test suite.
 config.name = 'SINISTER'
 config.suffixes = ['.c', '.cpp', '.test', '.s']
+config.test_format = lit.formats.ShTest()
 
 # The root path where tests are located. This property is necessary for test
 # discovery when using the 'check-all' target.

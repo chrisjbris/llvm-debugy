@@ -225,7 +225,7 @@ static const std::vector<OperandTypeArray> g_OperandTypes = {
 OperandTypeArray const &getOperandTypes(uint8_t Opcode) {
   assert(Opcode < g_OperandTypes.size() && "Expected valid opcode");
   return g_OperandTypes[Opcode];
-};
+}
 
 // Handily, LLVM already gives us all the DWARF operator names and codes
 // in llvm/BinaryFormat/Dwarf.def
@@ -256,7 +256,7 @@ struct SrcLoc {
 };
 
 struct Token {
-  enum Type { Opcode, Int, HexInt, Comma, Error, LParen, RParen } Ty;
+  enum Type { Opcode, Int, HexInt, Comma, Error, LParen, RParen, Comment } Ty;
   std::string_view lexeme;
   SrcLoc Loc;
   uint8_t Code;
@@ -319,6 +319,14 @@ class Lexer {
       // Not whitespace - end.
       break;
     }
+  }
+  void eatLine() {
+    bool EndLine = false;
+    char C = '#';
+    do { 
+        C = advance();
+        bool CR = match('\r');
+    } while (C != '\n' && C != '\v');
   }
 
   std::string_view getCurrentSubstr() {
@@ -384,6 +392,9 @@ class Lexer {
     // Otherwise, expect a DWARF opcode.
     if (Ch == 'D')
       return finishOpcode();
+    if (Ch == '#') {
+        return create(Token::Comment);
+    }
     return error(StartLoc, std::string("Unexpected character: ") + Ch);
   }
 
@@ -402,6 +413,10 @@ public:
       if (atEnd())
         break;
       Token Tok = getNext();
+      if(Tok.Ty == Token::Comment) {
+        eatLine();
+        continue;
+      }
       if (Tok.Ty == Token::Error)
         return std::nullopt;
       Output.push_back(Tok);

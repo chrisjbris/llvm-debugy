@@ -55,11 +55,13 @@ auto main(int argc, const char **argv) -> int {
 
   std::vector<uint8_t> *DemoProg = new std::vector<uint8_t>();
   {
-    std::string DemoExpression =
-        "DW_OP_const1u(1) DW_OP_const1u(2) DW_OP_plus DW_OP_stack_value";
-    auto Result = parseDwarfExpression(DemoExpression);
-    if (!Result.has_value())
+    // std::string DemoExpression =
+    //     "DW_OP_const1u(1) DW_OP_const1u(2) DW_OP_plus DW_OP_stack_value";
+    auto Result = parseDwarfExpression(SourceCode);
+    if (!Result.has_value()) {
+      std::cerr << "Failed parseDwarfExpression(): \n'" << SourceCode << "'\n";
       return -1;
+    }
     *DemoProg = std::move(Result.value());
   }
 
@@ -69,8 +71,11 @@ auto main(int argc, const char **argv) -> int {
   // Note - If the expected is not checked before it goes out of scope, then
   // there is an exception. So best to check immediately.
   llvm::Expected<lldb_private::Scalar> Result = DE.EvaluateProgram();
-  if (!Result)
+  if (!Result) {
+    std::string ProgString(DemoProg->begin(), DemoProg->end());
+    std::cerr << "Failed EvaluateProgram(): \n'" << ProgString << "'\n";
     return -1;
+  }
 
   // TODO: start using the llvm output methods
   std::cout << "Result: " << Result->UInt() << "\n\n";
