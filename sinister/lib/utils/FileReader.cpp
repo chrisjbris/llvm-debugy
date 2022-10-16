@@ -10,23 +10,22 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <iostream>
-#include <unistd.h>
-#include <sys/stat.h>
-#include <fcntl.h>
-
 #include "sinister/utils/FileReader.h"
+#include <string>
+#include <fstream>
+#include <streambuf>
 
 bool FileToString(std::string FileName, std::string &Dest) {
-    struct stat sb{};
-
-    int fd = open(FileName.c_str(), O_RDONLY);
-    if (fd < 0)
+    std::ifstream stream(FileName);
+    if (!stream.good())
         return false;
 
-    fstat(fd, &sb);
-    Dest.resize(sb.st_size);
-    read(fd, (char*)(Dest.data()), sb.st_size);
-    close(fd);
+    Dest = "";
+    stream.seekg(0, std::ios::end);
+    Dest.reserve(stream.tellg());
+    stream.seekg(0, std::ios::beg);
+
+    Dest.assign((std::istreambuf_iterator<char>(stream)),
+                std::istreambuf_iterator<char>());
     return true;
 }
