@@ -298,7 +298,12 @@ class Lexer {
   bool matchEndline() {
     // Sequences: \r\n, \n, \r, \v
     bool CR = match('\r');
-    return match('\n') || CR || match('\v');
+    if(match('\n') || CR || match('\v')) {
+      NextLoc.Column = 1;
+      NextLoc.Line += 1;
+      return true;
+    }
+    return false;
   }
   static Token error(SrcLoc Loc, std::string_view Msg) {
     printError(Loc, Msg);
@@ -314,8 +319,6 @@ class Lexer {
   void eatWhitespaceAndComments() {
     while (!atEnd()) {
       if (matchEndline()) {
-        NextLoc.Column = 1;
-        NextLoc.Line += 1;
         continue;
       } else if (match(' ') || match('\t')) {
         continue;
