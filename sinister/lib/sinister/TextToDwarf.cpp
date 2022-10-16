@@ -256,7 +256,7 @@ struct SrcLoc {
 };
 
 struct Token {
-  enum Type { Opcode, Int, HexInt, Comma, Error, LParen, RParen, Comment } Ty;
+  enum Type { Opcode, Int, HexInt, Comma, Error, LParen, RParen, } Ty;
   std::string_view lexeme;
   SrcLoc Loc;
   uint8_t Code;
@@ -295,6 +295,11 @@ class Lexer {
     advance();
     return true;
   }
+  bool matchEndline() {
+    // Sequences: \r\n, \n, \r, \v
+    bool CR = match('\r');
+    return match('\n') || CR || match('\v');
+  }
   static Token error(SrcLoc Loc, std::string_view Msg) {
     printError(Loc, Msg);
     return Token(Token::Error, std::string_view(), Loc);
@@ -306,29 +311,24 @@ class Lexer {
     printError(Loc, Err.str());
     return Token(Token::Error, std::string_view(), Loc);
   }
-  void eatWhitespace() {
+  void eatWhitespaceAndComments() {
     while (!atEnd()) {
-      bool CR = match('\r');
-      if (match('\n') || CR && match('\n') || CR || match('\v')) {
+      if (matchEndline()) {
         NextLoc.Column = 1;
         NextLoc.Line += 1;
         continue;
       } else if (match(' ') || match('\t')) {
+        continue;
+      } else if (match('#')) {
+        // Comments start with # and continue to the end of the line.
+        while (!matchEndline())
+          advance();
         continue;
       }
       // Not whitespace - end.
       break;
     }
   }
-  void eatLine() {
-    bool EndLine = false;
-    char C = '#';
-    do { 
-        C = advance();
-        bool CR = match('\r');
-    } while (C != '\n' && C != '\v');
-  }
-
   std::string_view getCurrentSubstr() {
     return Text.substr(Start, Next - Start);
   }
@@ -392,9 +392,6 @@ class Lexer {
     // Otherwise, expect a DWARF opcode.
     if (Ch == 'D')
       return finishOpcode();
-    if (Ch == '#') {
-        return create(Token::Comment);
-    }
     return error(StartLoc, std::string("Unexpected character: ") + Ch);
   }
 
@@ -407,16 +404,12 @@ public:
   std::optional<llvm::SmallVector<Token>> lex() {
     llvm::SmallVector<Token> Output;
     while (!atEnd()) {
-      eatWhitespace();
+      eatWhitespaceAndComments();
       Start = Next;
       StartLoc = NextLoc;
       if (atEnd())
         break;
       Token Tok = getNext();
-      if(Tok.Ty == Token::Comment) {
-        eatLine();
-        continue;
-      }
       if (Tok.Ty == Token::Error)
         return std::nullopt;
       Output.push_back(Tok);
