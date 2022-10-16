@@ -15,12 +15,11 @@
 #include <vector>
 
 #include "llvm/Support/CommandLine.h"
-
 #include "sinister/DwarfExecutor.h"
 #include "sinister/utils/FileReader.h"
 #include "sinister/sinister.h"
 #include "sinister/TextToDwarf.h"
-
+#include <iomanip>
 #include <iostream>
 
 static llvm::cl::opt<std::string> InputFilename(llvm::cl::Positional,
@@ -72,8 +71,11 @@ auto main(int argc, const char **argv) -> int {
   // there is an exception. So best to check immediately.
   llvm::Expected<lldb_private::Scalar> Result = DE.EvaluateProgram();
   if (!Result) {
-    std::string ProgString(DemoProg->begin(), DemoProg->end());
-    std::cerr << "Failed EvaluateProgram(): \n'" << ProgString << "'\n";
+    std::cerr << "Failed EvaluateProgram(): \n";
+    for (uint8_t Ch: *DemoProg)
+        std::cerr << "0x" << std::setfill('0') << std::setw(2) << std::hex
+                  << (unsigned)Ch << " ";
+    std::cerr << "\n";
     return -1;
   }
 
