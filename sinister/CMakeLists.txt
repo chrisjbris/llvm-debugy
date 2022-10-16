@@ -20,3 +20,11 @@ add_llvm_executable(sinister
 )
 
 target_link_libraries(sinister PRIVATE lldbCore)
+
+add_llvm_executable(purify
+    lib/purify/DIExpressionParse.cpp
+    lib/purify/purify.cpp
+    lib/utils/FileReader.cpp
+)
+
+target_link_libraries(purify PRIVATE LLVMSupport LLVMTestingSupport LLVMAsmParser)

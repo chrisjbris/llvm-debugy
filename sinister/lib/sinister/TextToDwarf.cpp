@@ -59,7 +59,7 @@ static const std::vector<OperandTypeArray> g_OperandTypes = {
     /* 0x08, const1u             */ {u1},
     /* 0x09, const1s             */ {s1},
     /* 0x0a, const2u             */ {u2},
-    /* 0x0b, const2s             */ {u2},
+    /* 0x0b, const2s             */ {s2},
     /* 0x0c, const4u             */ {u4},
     /* 0x0d, const4s             */ {s4},
     /* 0x0e, const8u             */ {u8},
