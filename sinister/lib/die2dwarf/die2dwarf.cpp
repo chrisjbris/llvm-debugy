@@ -8,8 +8,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
-#include "purify/DIExpressionParse.h"
-#include "purify/purify.h"
+#include "die2dwarf/DIExpressionParse.h"
 
 #include "sinister/utils/FileReader.h"
 
@@ -31,7 +30,7 @@ auto main(int argc, const char **argv) -> int {
       call void @llvm.dbg.value(metadata i16 %b, metadata !9, metadata !DIExpression())
 )";
 
- DIExpressionParse DP;
+ die2dwarf::DIExpressionParse DP;
 
  std::unique_ptr<llvm::Module> M = DP.GetModuleFromIR(SourceCode);
 

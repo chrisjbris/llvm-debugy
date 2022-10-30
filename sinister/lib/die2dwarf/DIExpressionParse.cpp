@@ -1,7 +1,7 @@
 
 
 
-#include "purify/DIExpressionParse.h"
+#include "die2dwarf/DIExpressionParse.h"
 
 #include "llvm/AsmParser/LLParser.h"
 
@@ -12,10 +12,9 @@
 
 #include <memory>
 
+namespace die2dwarf {
 std::unique_ptr<llvm::Module>
 DIExpressionParse::GetModuleFromIR(llvm::StringRef Src) {
-
- // llvm::dbgs() << " Source is: \n" << Src << "\n\n";
 
   std::unique_ptr<llvm::Module> M = llvm::parseAssemblyString(Src, SMD, Ctx);
 
@@ -26,7 +25,7 @@ DIExpressionParse::GetModuleFromIR(llvm::StringRef Src) {
       llvm::dbgs() << *M;
   }
 
-
-
   return M;
 }
+
+} // namespace die2dwarf 

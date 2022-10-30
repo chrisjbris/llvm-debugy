@@ -21,10 +21,10 @@ add_llvm_executable(sinister
 
 target_link_libraries(sinister PRIVATE lldbCore)
 
-add_llvm_executable(purify
-    lib/purify/DIExpressionParse.cpp
-    lib/purify/purify.cpp
+add_llvm_executable(die2dwarf
+    lib/die2dwarf/DIExpressionParse.cpp
+    lib/die2dwarf/die2dwarf.cpp
     lib/utils/FileReader.cpp
 )
 
-target_link_libraries(purify PRIVATE LLVMSupport LLVMTestingSupport LLVMAsmParser)
+target_link_libraries(die2dwarf PRIVATE LLVMSupport LLVMTestingSupport LLVMAsmParser)
