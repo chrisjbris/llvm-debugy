@@ -26,11 +26,19 @@ auto main(int argc, const char **argv) -> int {
   }
 
 
+//const char 
+
  const char *MinimalSrc = R"(
       call void @llvm.dbg.value(metadata i16 %b, metadata !9, metadata !DIExpression())
 )";
 
  die2dwarf::DIExpressionParse DP;
+
+ // Embed the llvm.dbg.value in a dummy module.
+ if(!die2dwarf::CreateModuleSource(&SourceCode)) {
+  llvm::dbgs() << "Couldn't merge string into source";
+  return -1;
+ }
 
  std::unique_ptr<llvm::Module> M = DP.GetModuleFromIR(SourceCode);
 
