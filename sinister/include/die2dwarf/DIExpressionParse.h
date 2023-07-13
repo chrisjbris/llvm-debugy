@@ -29,33 +29,7 @@ public:
 
 private:
 
-const char *Part0 = R"(
-    define i18 @f(
-)";
 
-// Immediately after the DIArgList.
-const char *Part1 = R"(
-) {
-
-)";
-
-// Insert the complete "call @dbg.value... etc here.
-
-// Post call @dbg.declare
-// For now the source variable metadata is always !4.
-// TODO: support any number and perform a find & replace or similar op t construct
-
-const char *Part2 = R"(
-    ret i8 0
-    }
-    declare void @llvm.dbg.value(metadata, metadata, metadata) #0
-    attributes #0 = { nounwind readnone speculatable willreturn }
-
-    !1 = !DIFile(filename: "dummy.cpp", directory: "/die2dwarf")
-    !2 = !DIBasicType(name: "unsigned int", size: 8, encoding: DW_ATE_unsigned)
-    !3 = distinct !DISubprogram(name: "f", linkageName: "_f", scope: !1, file: !1, line: 11, type: !2, scopeLine: 17, flags: DIFlagPrototyped, spFlags: DISPFlagDefinition, unit: !0, retainedNodes: !{})
-    !4 = !DILocalVariable(name: "comp", scope: !13, file: !1, line: 22, type: !12)
-)";
 
    
   bool EmbedDIExprInDummySrc();

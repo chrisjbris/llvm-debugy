@@ -24,6 +24,7 @@ target_link_libraries(sinister PRIVATE lldbCore)
 add_llvm_executable(die2dwarf
     lib/die2dwarf/DIExpressionParse.cpp
     lib/die2dwarf/die2dwarf.cpp
+    lib/die2dwarf/ModuleToDWARF.cpp
     lib/utils/FileReader.cpp
 )
 

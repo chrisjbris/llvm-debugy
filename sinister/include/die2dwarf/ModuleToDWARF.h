@@ -10,22 +10,36 @@
 // can be read as LLVM assembly and later translated to pure DWARF.
 //===----------------------------------------------------------------------===//
 
- // To use parseAssemblyString() to read the DIArgList and DIExpression into
- // their in-memory representations, a valid LLVM IR program is required. The
- // following is the basis for that 'dummy' program'.
- // Chris: I don't think the type of the source variable matters.
- // Variables to replaces:
- // ###args### - The DIArgList
- // ##src_var_num### - The metadata number of the source variable
- namespace purify {
+// Given a synthetic module created with a string dbg.value, enable printing
+// of the DIExpression in pure DWARF instead of LLVM extended-DWARF.
 
-class DbgValToModule { 
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Module.h"
+#include "llvm/IR/Type.h"
+
+#include <iostream>
+
+ namespace die2dwarf {
+
+class ModuleToDWARF { 
 public:
-    bool ParseDbgVal(StringRef DvgVal);
+  ModuleToDWARF(llvm::Module &Module): M(Module) {
+    // Find the dbg.value & point to the expression.
+    std::cout << "\n\n\n Synthetic module:\n";
+    
+    auto Fun = Module.getNamedValue("fun");
+    assert(Fun && "Could not find function in module.");
+    auto F = cast<llvm::Function>(Fun);
+    auto I = &F->front().front();
+    auto *DbgVal = cast<llvm::DbgValueInst>(I);
+    Expr = DbgVal->getExpression();
+  }
+
+    void print();
 
 private:
-    llvm::Module *M;
+    llvm::Module &M;
+    llvm::DIExpression *Expr;
+  };
 
-};
-
- } // namespace purify
+ } // namespace die2dwarf
